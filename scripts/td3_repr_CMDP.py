@@ -4,7 +4,7 @@ import argparse
 import yaml
 import numpy as np
 import gymnasium as gym
-import safety_gymnasium as sgym
+from safety_gym_extension.utils.make import make_env
 import torch
 import time
 import wandb
@@ -12,7 +12,7 @@ import wandb
 from fcsrl.agent import TD3LagReprAgent
 from fcsrl.trainer import offpolicy_trainer
 from fcsrl.data import Collector, ReplayBuffer
-from fcsrl.env import SubprocVectorEnv, GoalWrapper, ActionRepeatWrapper
+from fcsrl.env import SubprocVectorEnv
 from fcsrl.utils import DeviceConfig, set_seed, BaseNormalizer, MeanStdNormalizer, dict2attr
 
 def main():
@@ -41,13 +41,13 @@ def main():
     lagrg_cfg = config.Lagrangian
     misc_cfg = config.misc
 
-    env = GoalWrapper(gym.make(env_cfg.name))
+    env = make_env(env_cfg.name)
     config.network.s_dim = np.prod(env.observation_space.shape) or env.observation_space.n
     config.network.a_dim = np.prod(env.action_space.shape) or env.action_space.n
     config.agent.action_range = [env.action_space.low[0], env.action_space.high[0]]
 
-    train_env_fn = lambda: ActionRepeatWrapper(GoalWrapper(gym.make(env_cfg.name)), 4)
-    test_env_fn = lambda: ActionRepeatWrapper(gym.make(env_cfg.name), 4)
+    train_env_fn = lambda: make_env(env_cfg.name)
+    test_env_fn = lambda: make_env(env_cfg.name)
     train_envs = SubprocVectorEnv(
         [train_env_fn for _ in range(env_cfg.num_env_train)])
     test_envs = SubprocVectorEnv(
@@ -117,6 +117,9 @@ def main():
             metric_convert_fn,
             save_path, 
             stop_fn, 
+            env_name=env_cfg.name,
+            seed=misc_cfg.seed,
+            algo_name=args.repr_type,
         )
 
         train_collector.close()

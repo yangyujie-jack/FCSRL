@@ -3,7 +3,7 @@ import gymnasium as gym
 import numpy as np
 import time
 
-from safety_gymnasium.bases.underlying import VisionEnvConf
+# from safety_gymnasium.bases.underlying import VisionEnvConf
 
 class GoalWrapper(gym.Wrapper):
     def __init__(self, env):
