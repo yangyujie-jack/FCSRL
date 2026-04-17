@@ -183,7 +183,8 @@ class TD3LagReprAgent(BaseAgent):
         batch.cost = to_tensor(batch.cost).unsqueeze(-1)
         batch.terminate = to_tensor(batch.terminate).unsqueeze(-1)
         
-        B, N, H = len(indices), self._nstep_return, self._unroll_length
+        B, N_param, H = len(indices), self._nstep_return, self._unroll_length
+        N = max(N_param, H)
         indices_NxB = [indices]
         for _ in range(N - 1):
             indices_NxB.append((indices_NxB[-1]+1) % len(replay))
@@ -290,13 +291,17 @@ class TD3LagReprAgent(BaseAgent):
             feasi_next = to_numpy(feasi_next)[1:] # (N-1, B, 1)
 
         c = batch_NxB.cost
-        feasi_score = [feasi_next[-1]]
-        for n in reversed(range(N-1)):
-            feasi_score_next = (1-batch_NxB.trunc[n]) * feasi_score[-1] + batch_NxB.trunc[n] * feasi_next[n]
-            feasi_score.append(
-                np.maximum(c[n], discount * (1-batch_NxB.terminate[n])*feasi_score_next ) # [B,1]
-            )
-        feasi_score = np.stack(list(reversed(feasi_score)), 0) # (N,B,1)
+        
+        if N == 1:
+            feasi_score = feasi_next
+        else:
+            feasi_score = [feasi_next[-1]]
+            for n in reversed(range(N-1)):
+                feasi_score_next = (1-batch_NxB.trunc[n]) * feasi_score[-1] + batch_NxB.trunc[n] * feasi_next[n]
+                feasi_score.append(
+                    np.maximum(c[n], discount * (1-batch_NxB.terminate[n])*feasi_score_next ) # [B,1]
+                )
+            feasi_score = np.stack(list(reversed(feasi_score)), 0) # (N,B,1)
         return feasi_score
     
 
