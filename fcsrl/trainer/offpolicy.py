@@ -21,6 +21,9 @@ def offpolicy_trainer(
     metric_convert_fn: Optional[Callable],
     save_path: Optional[str],
     stop_fn: Optional[Callable] = None,
+    env_name: str = "",
+    seed: int = 0,
+    algo_name: str = "FCSRL"
 ):
     
     global_optim_step = 0 # step of optimization by Gradient Descent
@@ -31,6 +34,9 @@ def offpolicy_trainer(
 
     wandb.define_metric('Steps')
     wandb.define_metric("*", step_metric="Steps")
+    
+    # Init history to store curves
+    history_records = []
 
     if n_episode_warmup > 0:
         print('------ Start warm-up. ------')
@@ -137,6 +143,33 @@ def offpolicy_trainer(
         print(f'test_reward: {result["reward"]:.3f}±{np.std(result["reward_list"]):.3f}')
         print(f'test_cost: {result["cost"]:.3f}±{np.std(result["cost_list"]):.3f}')
         print(f'best: reward {best_reward:.3f}, cost {best_cost:.3f} in #{best_epoch}')
+        
+        # Add to history and save CSV incrementally
+        history_records.append({
+            "epoch": epoch,
+            "steps": global_length,
+            "test_reward": result['reward'],
+            "test_cost": result['cost']
+        })
+        import pandas as pd
+        df = pd.DataFrame(history_records)
+
+        if save_path:
+            csv_path = os.path.join(save_path, "training_curve.csv")
+            df.to_csv(csv_path, index=False)
+            
+        if env_name:
+            cost_dir = os.path.join("result", env_name, "cost")
+            ret_dir = os.path.join("result", env_name, "return")
+            os.makedirs(cost_dir, exist_ok=True)
+            os.makedirs(ret_dir, exist_ok=True)
+            
+            cost_path = os.path.join(cost_dir, f"{algo_name}_s{seed}.csv")
+            ret_path = os.path.join(ret_dir, f"{algo_name}_s{seed}.csv")
+            
+            df[['steps', 'test_cost']].to_csv(cost_path, index=False)
+            df[['steps', 'test_reward']].to_csv(ret_path, index=False)
+
         if stop_fn and stop_fn(best_reward):
             break
     return gather_info(start_time, train_collector, test_collector, best_reward)
