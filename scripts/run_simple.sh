@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# 定义要运行的环境列表，对应 safety_gym_extension 中的 4 个环境
+# 定义要运行的环境列表，对应 simple_safe_env 中的环境
 ENVS=(
-    "PointGoal-v0"
-    "CarGoal-v0"
-    "PointPush-v0"
-    "CarPush-v0"
+    "ACC-v0"
+    "LaneKeeping-v0"
+    "Pendulum-v0"
+    "Quadrotor-v0"
 )
 
 # 定义其他超参数
@@ -15,7 +15,7 @@ CUDA_ID=0
 # 设置 wandb 为离线模式，以跳过联网登录提示
 export WANDB_MODE=offline
 
-echo "开始顺序运行 4 个 safety gym 任务..."
+echo "开始顺序运行 simple safe env 任务..."
 
 for env in "${ENVS[@]}"; do
     echo "========================================================="
@@ -23,7 +23,7 @@ for env in "${ENVS[@]}"; do
     echo "========================================================="
     
     # 运行 td3 训练脚本
-    python scripts/td3_repr_CMDP_safety_gym.py \
+    python scripts/td3_repr_CMDP_simple.py \
         --env_name "$env" \
         --seed "$SEED" \
         --cudaid "$CUDA_ID"

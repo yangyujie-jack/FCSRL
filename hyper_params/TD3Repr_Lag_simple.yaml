@@ -27,18 +27,18 @@ network:
     repr_type: "FCSRL"
 
 env:
-    name: "PointGoal-v0"
+    name: "ACC-v0"
     num_env_train: 10
     num_env_test: 10
     max_episode_len: 1000
 
 trainer:
-    replay_size: 4000000
+    replay_size: 2000000
     warmup_episode: 10
-    epoch: 400
+    epoch: 200
     grad_step_per_epoch: 500
     collect_len_per_step: 20
-    batch_size: 1024
+    batch_size: 256
 
     test_episode: 10
 
