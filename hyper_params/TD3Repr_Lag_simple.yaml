@@ -47,8 +47,8 @@ trainer:
 
 Lagrangian:
     init_lagrg: 0.0
-    KP: 0.02
-    KI: 0.0
+    KP: 0.0
+    KI: 0.005
     KD: 0.0
     max_lambda: &MAX_LAMBDA 100.0
     constraint_threshold: &CONSTRAINT_THRESHOLD 0
