@@ -23,7 +23,8 @@ def offpolicy_trainer(
     stop_fn: Optional[Callable] = None,
     env_name: str = "",
     seed: int = 0,
-    algo_name: str = "FCSRL"
+    algo_name: str = "FCSRL",
+    update_by_J: bool = True
 ):
     
     global_optim_step = 0 # step of optimization by Gradient Descent
@@ -88,7 +89,13 @@ def offpolicy_trainer(
                     wandb.log({**loss_dict, "Steps":global_optim_step})
 
                     if hasattr(agent, 'update_lagrangian_multiplier') and epoch >= 1:
-                        agent.update_lagrangian_multiplier(result['cost'])
+                        if update_by_J:
+                            # 使用真实的 episodic cost 均值
+                            qc_val = result['cost']
+                        else:
+                            # 使用 Q 的均值来更新拉格朗日乘子
+                            qc_val = loss_dict['loss/actor_qc']
+                        agent.update_lagrangian_multiplier(qc_val)
 
                     # if 'reward_list' in result:
                     #     for r, c, l in zip(result['reward_list'], result['cost_list'], result['length_list']):

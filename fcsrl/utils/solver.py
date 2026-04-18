@@ -16,7 +16,7 @@ class PIDLagrangianUpdater:
         self.error_integral = 0.0
         self.lag = init_lag
         self.max_lag = max_lag
-        self.min_integral = min_integral_coef / self.KI 
+        self.min_integral = min_integral_coef / self.KI if self.KI > 0.0 else -float('inf')
         # s.t. KI * error_int >= min_integral_coef
 
     def update(self, curr_cost, thres):

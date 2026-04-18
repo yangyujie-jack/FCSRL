@@ -9,8 +9,8 @@ agent:
     noise_clip: 0.5
     update_actor_freq: 2
     nstep_return: 2
-    unroll_length: 4
-    obs_normalizer: MeanStdNormalizer
+    unroll_length: 2
+    obs_normalizer: BaseNormalizer
 
 network:
     # actor_network: ActorProb
@@ -48,11 +48,11 @@ trainer:
 Lagrangian:
     init_lagrg: 0.0
     KP: 0.02
-    KI: 0.005
-    KD: 0.01
+    KI: 0.0
+    KD: 0.0
     max_lambda: &MAX_LAMBDA 100.0
     constraint_threshold: &CONSTRAINT_THRESHOLD 0
-    update_by_J: True  # else update by E[q_c]
+    update_by_J: False  # else update by E[q_c]
     schedule_threshold: False
     threshold_start: 200
     threshold_end: *CONSTRAINT_THRESHOLD

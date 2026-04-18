@@ -430,12 +430,15 @@ class TD3LagReprAgent(BaseAgent):
         self.cost_critic_optim.step()
         metrics['loss/critic_c'] = cost_critic_loss.item()
         
+        act = self.actor(batch.obs, fixed_zs) * self._act_scale + self._act_bias
+        zsa = self.fixed_encoder.zsa(fixed_zs, act)
+        current_q_c = self.cost_critic(batch.obs, fixed_zs, act, zsa).mean()
+        self._last_qc = current_q_c.item()
+        metrics['loss/actor_qc'] = self._last_qc
+
         # 2. train actor
         if self._cnt % self._update_actor_freq == 0:
-            act = self.actor(batch.obs, fixed_zs) * self._act_scale + self._act_bias
-            zsa = self.fixed_encoder.zsa(fixed_zs, act)
             current_q_r = self.critic(batch.obs, fixed_zs, act, zsa).mean()
-            current_q_c = self.cost_critic(batch.obs, fixed_zs, act, zsa).mean()
 
             self.lagrg = self.lagrg_updater.get_lagrg()
             actor_loss = -(current_q_r - self.lagrg * current_q_c)
@@ -445,9 +448,7 @@ class TD3LagReprAgent(BaseAgent):
             self.actor_optim.step()
             
             self._last_qr = current_q_r.item()
-            self._last_qc = current_q_c.item()
             metrics['loss/actor_qr'] = self._last_qr
-            metrics['loss/actor_qc'] = self._last_qc
             
             self.sync_weights()
         self._cnt += 1

@@ -98,10 +98,7 @@ def main():
             )
 
         # trainer and start training
-        if lagrg_cfg.update_by_J:
-            metric_convert_fn = None 
-        else: 
-            raise NotImplementedError("Lagrangian update by Q function is not supported.")
+        metric_convert_fn = None
         
         result = offpolicy_trainer(
             agent, 
@@ -120,6 +117,7 @@ def main():
             env_name=env_cfg.name,
             seed=misc_cfg.seed,
             algo_name=args.repr_type,
+            update_by_J=lagrg_cfg.update_by_J,
         )
 
         train_collector.close()
