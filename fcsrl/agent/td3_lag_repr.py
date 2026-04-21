@@ -203,8 +203,18 @@ class TD3LagReprAgent(BaseAgent):
         mask_ = 1.0 - (np.cumsum(end_NxB,0) > 0.5).astype(float)
         mask = np.concatenate([np.ones((1,B,1)), mask_[:-1]], 0) # (N,B,1)
 
-        return_r_NxB, return_c_NxB = self.compute_TD_lambda_return(batch_NxB)
-        feasi_NxB = self.compute_nstep_feasibility(batch_NxB)
+        batch_NxB_Nparam = Batch(
+            obs=batch_NxB.obs[:N_param],
+            act=batch_NxB.act[:N_param],
+            obs_next=batch_NxB.obs_next[:N_param],
+            rew=batch_NxB.rew[:N_param],
+            cost=batch_NxB.cost[:N_param],
+            terminate=batch_NxB.terminate[:N_param],
+            trunc=batch_NxB.trunc[:N_param]
+        ) if N_param < N else batch_NxB
+
+        return_r_NxB, return_c_NxB = self.compute_TD_lambda_return(batch_NxB_Nparam)
+        feasi_NxB = self.compute_nstep_feasibility(batch_NxB_Nparam)
 
         # (B, 1)
         batch.return_r, batch.return_c = return_r_NxB[0], return_c_NxB[0]
@@ -213,8 +223,6 @@ class TD3LagReprAgent(BaseAgent):
         batch.cost_HxB = to_tensor(batch_NxB.cost[:H])
         batch.obs_next_HxB = to_tensor(batch_NxB.obs_next.reshape(N,B,-1)[:H])
         batch.mask_HxB = to_tensor(mask[:H])
-        batch.return_r_HxB = to_tensor(return_r_NxB[:H])
-        batch.return_c_HxB = to_tensor(return_c_NxB[:H])
         batch.feasi_HxB = to_tensor(feasi_NxB[:H])
 
         return batch
@@ -254,23 +262,43 @@ class TD3LagReprAgent(BaseAgent):
         self, 
         batch_NxB: Batch,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        N, B = batch_NxB.rew.shape[0], batch_NxB.rew.shape[1]
+        # TD lambda return N step logic
+        N = getattr(batch_NxB, "rew").shape[0] if getattr(batch_NxB, "rew").ndim >= 3 else 1
+        B = getattr(batch_NxB, "rew").shape[1] if getattr(batch_NxB, "rew").ndim >= 3 else getattr(batch_NxB, "rew").shape[0]
+        
         TD_lambda = 1.0 # TD(1) is equivalent to n_step return
-
-        if len(batch_NxB.obs_next.shape) > 2:
-            batch_NxB.obs_next = batch_NxB.obs_next.reshape(N*B, -1)
         
         returns = []
         for value_type in ["rew", "cost"]:
-            value_next = self._next_q(batch_NxB, value_type).reshape(N,B,1)
-            value_next = to_numpy(value_next)
+            value_next_val = self._next_q(batch_NxB, value_type)
+            
+            value_next_val = value_next_val.reshape(-1, 1).expand(N * B, 1).reshape(N, B, 1)
+            value_next_val = to_numpy(value_next_val)
+            
             r_or_c = getattr(batch_NxB, value_type)
-            ret = [value_next[-1]]
+            if isinstance(r_or_c, np.ndarray):
+                r_or_c = torch.tensor(r_or_c)
+            r_or_c = r_or_c.reshape(-1, 1).expand(N * B, 1).reshape(N, B, 1)
+            r_or_c = to_numpy(r_or_c)
+            
+            batch_trunc = batch_NxB.trunc
+            if isinstance(batch_trunc, np.ndarray):
+                batch_trunc = torch.tensor(batch_trunc)
+            batch_trunc = batch_trunc.reshape(-1, 1).expand(N * B, 1).reshape(N, B, 1)
+            batch_trunc = to_numpy(batch_trunc)
+                
+            batch_terminate = batch_NxB.terminate
+            if isinstance(batch_terminate, np.ndarray):
+                batch_terminate = torch.tensor(batch_terminate)
+            batch_terminate = batch_terminate.reshape(-1, 1).expand(N * B, 1).reshape(N, B, 1)
+            batch_terminate = to_numpy(batch_terminate)
+                
+            ret = [value_next_val[-1]]
             for n in reversed(range(N)):
-                ret_next = (1-batch_NxB.trunc[n]) * ret[-1] + batch_NxB.trunc[n] * value_next[n]
+                ret_next = (1-batch_trunc[n]) * ret[-1] + batch_trunc[n] * value_next_val[n]
                 ret.append(
-                    r_or_c[n] + self._gamma*(1-batch_NxB.terminate[n])*(
-                        (1-TD_lambda)*value_next[n]+TD_lambda*ret_next
+                    r_or_c[n] + self._gamma*(1-batch_terminate[n])*(
+                        (1-TD_lambda)*value_next_val[n]+TD_lambda*ret_next
                     ) # [B,1]
                 )
             ret = np.stack(list(reversed(ret[1:])), 0) # (N,B,1)
@@ -281,25 +309,50 @@ class TD3LagReprAgent(BaseAgent):
         self, 
         batch_NxB: Batch,
     ) -> np.ndarray:
-        N, B = batch_NxB.rew.shape[0], batch_NxB.rew.shape[1]
+        N = getattr(batch_NxB, "rew").shape[0] if getattr(batch_NxB, "rew").ndim >= 3 else 1
+        B = getattr(batch_NxB, "rew").shape[1] if getattr(batch_NxB, "rew").ndim >= 3 else getattr(batch_NxB, "rew").shape[0]
         discount = 0.9
 
         with torch.no_grad():
-            zs_next = self.fixed_encoder.zs(batch_NxB.obs_next) # (N*B, ...)
-            feasi_next_logits = self.feasi_head(zs_next).reshape(N,B,-1)
+            obs_next = batch_NxB.obs_next
+            original_shape = obs_next.shape
+            if len(obs_next.shape) > 2:
+                obs_next = obs_next.reshape(-1, obs_next.shape[-1])
+            zs_next = self.fixed_encoder.zs(obs_next) # (N*B, ...)
+            
+            feasi_next_logits = self.feasi_head(zs_next)
+            feasi_next_logits = feasi_next_logits.reshape(-1, 1, feasi_next_logits.shape[-1]).expand(N * B, 1, feasi_next_logits.shape[-1]).reshape(N,B,-1)
+            
             feasi_next = DiscDist(feasi_next_logits, self.bucket_low, self.bucket_high, self.n_buckets).mean()
-            feasi_next = to_numpy(feasi_next)[1:] # (N-1, B, 1)
+            feasi_next = to_numpy(feasi_next) # (N, B, 1)
 
-        c = batch_NxB.cost
+        c = getattr(batch_NxB, "cost")
+        if isinstance(c, np.ndarray):
+            c = torch.tensor(c)
+        c = c.reshape(-1, 1).expand(N * B, 1).reshape(N, B, 1)
+        c = to_numpy(c)
+        
+        batch_trunc = getattr(batch_NxB, "trunc")
+        if isinstance(batch_trunc, np.ndarray):
+            batch_trunc = torch.tensor(batch_trunc)
+        batch_trunc = batch_trunc.reshape(-1, 1).expand(N * B, 1).reshape(N, B, 1)
+        batch_trunc = to_numpy(batch_trunc)
+            
+        batch_terminate = getattr(batch_NxB, "terminate")
+        if isinstance(batch_terminate, np.ndarray):
+            batch_terminate = torch.tensor(batch_terminate)
+        batch_terminate = batch_terminate.reshape(-1, 1).expand(N * B, 1).reshape(N, B, 1)
+        batch_terminate = to_numpy(batch_terminate)
         
         if N == 1:
-            feasi_score = feasi_next
+            feasi_score = np.maximum(c, discount * (1-batch_terminate) * feasi_next)
         else:
-            feasi_score = [feasi_next[-1]]
+            feasi_next_sliced = feasi_next[1:] # (N-1, B, 1)
+            feasi_score = [feasi_next_sliced[-1]]
             for n in reversed(range(N-1)):
-                feasi_score_next = (1-batch_NxB.trunc[n]) * feasi_score[-1] + batch_NxB.trunc[n] * feasi_next[n]
+                feasi_score_next = (1-batch_trunc[n]) * feasi_score[-1] + batch_trunc[n] * feasi_next_sliced[n]
                 feasi_score.append(
-                    np.maximum(c[n], discount * (1-batch_NxB.terminate[n])*feasi_score_next ) # [B,1]
+                    np.maximum(c[n], discount * (1-batch_terminate[n])*feasi_score_next ) # [B,1]
                 )
             feasi_score = np.stack(list(reversed(feasi_score)), 0) # (N,B,1)
         return feasi_score
@@ -310,9 +363,14 @@ class TD3LagReprAgent(BaseAgent):
         batch: Batch, 
         value_type: str = 'rew',
     ) -> torch.Tensor:
+        if len(batch.obs_next.shape) > 2:
+            obs_next = batch.obs_next.reshape(-1, batch.obs_next.shape[-1])
+        else:
+            obs_next = batch.obs_next
+            
         with torch.no_grad():
-            zs_next = self.fixed_encoder.zs(batch.obs_next)
-            a_next = self.actor_old(batch.obs_next, zs_next)
+            zs_next = self.fixed_encoder.zs(obs_next)
+            a_next = self.actor_old(obs_next, zs_next)
             a_noise = torch.randn(size=a_next.shape, device=a_next.device) * self._policy_noise
             if self._noise_clip > 0.0:
                 a_noise = a_noise.clamp(-self._noise_clip, self._noise_clip)
@@ -320,9 +378,9 @@ class TD3LagReprAgent(BaseAgent):
             
             zsa_next = self.fixed_encoder.zsa(zs_next, a_next)
             if value_type == 'rew':
-                next_q, _ = self.critic_old(batch.obs_next, zs_next, a_next, zsa_next).min(dim=1, keepdim=True)
+                next_q, _ = self.critic_old(obs_next, zs_next, a_next, zsa_next).min(dim=1, keepdim=True)
             elif value_type == 'cost':
-                next_q, _ = self.cost_critic_old(batch.obs_next, zs_next, a_next, zsa_next).max(dim=1, keepdim=True)
+                next_q, _ = self.cost_critic_old(obs_next, zs_next, a_next, zsa_next).max(dim=1, keepdim=True)
             
         return next_q
 
@@ -331,7 +389,7 @@ class TD3LagReprAgent(BaseAgent):
         batch: Batch, 
         value_type: str = 'rew',
     ) -> torch.Tensor:
-        next_q = self._next_q(batch)
+        next_q = self._next_q(batch, value_type)
         r_or_c = getattr(batch, value_type)
         target_q = r_or_c + (1.0-batch.terminate) * self._gamma * next_q
         return target_q
@@ -373,10 +431,11 @@ class TD3LagReprAgent(BaseAgent):
         dynamics_loss = dynamics_loss.mean()
 
         # predict per-step feasibility
+        feasi_H = batch.feasi_HxB.shape[0]
         feasi_pred_logits = self.feasi_head(pred_zs_1toH_flatten).reshape(H,B,-1)
-        feasi_pred_dist = DiscDist(feasi_pred_logits, self.bucket_low, self.bucket_high, self.n_buckets)
+        feasi_pred_dist = DiscDist(feasi_pred_logits[:feasi_H], self.bucket_low, self.bucket_high, self.n_buckets)
         feasi_pred_mean = feasi_pred_dist.mean().detach()
-        feasi_loss = - feasi_pred_dist.log_prob(batch.feasi_HxB) * batch.mask_HxB
+        feasi_loss = - feasi_pred_dist.log_prob(batch.feasi_HxB) * batch.mask_HxB[:feasi_H]
         feasi_loss = feasi_loss.mean()
 
         encoder_loss = (
