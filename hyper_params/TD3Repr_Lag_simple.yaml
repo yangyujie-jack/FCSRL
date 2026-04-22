@@ -8,8 +8,8 @@ agent:
     policy_noise: 0.2
     noise_clip: 0.5
     update_actor_freq: 2
-    nstep_return: 2
-    unroll_length: 2
+    nstep_return: 1
+    unroll_length: 4
     obs_normalizer: BaseNormalizer
 
 network:
